@@ -10,61 +10,61 @@
 #define RANDOM_SEED 7665
 #define MAX_RANDOM_NUMBER 5000
 
-long gRefTime;
-int gData[MAX_SIZE];
+long g_ref_time;
+int g_data[MAX_SIZE];
 
-int gThreadCount;
+int g_thread_count;
 // Number of threads that are done at a certain point. Whenever a thread is done, it increments this.
 // Used with the semaphore-based solution
-int gDoneThreadCount;
+int g_done_thread_count;
 // The minimum value found by each thread
-int gThreadMin[MAX_THREADS];
+int g_thread_minima[MAX_THREADS];
 // Is this thread done? Used when the parent is continually checking on child threads
-bool gThreadDone[MAX_THREADS];
+bool g_thread_done[MAX_THREADS];
 
 // To notify parent that all threads have completed or one of them found a zero
 sem_t completed;
-// Binary semaphore to protect the shared variable gDoneThreadCount
+// Binary semaphore to protect the shared variable g_done_thread_count
 sem_t mutex;
 
 // Sequential FindMin (no threads)
-int SqFindMin(int size);
+int find_min_sequential(int size);
 
 // Thread FindMin but without semaphores
-void *ThFindMin(void *param);
+void * find_min_parallel_spin(void *param);
 
 // Thread FindMin with semaphores
-void *ThFindMinWithSemaphore(void *param);
+void * find_min_parallel_sem(void *param);
 
 // Search all thread minima to find the minimum value found in all threads
-int SearchThreadMin();
+int search_thread_minima();
 
-void InitSharedVars();
+void init_shared_variables();
 
 // Generate the input array
-void GenerateInput(int size, int indexForZero);
+void generate_input(int size, int index_for_zero);
 
 // Calculate the indices to divide the array into T divisions, one division per thread
-void CalculateIndices(int arraySize, int thrdCnt, int indices[MAX_THREADS][3]);
+void calculate_indices(int array_size, int thread_count, int **indices);
 
 // Get a random number between min and max
-int GetRand(int min, int max);
+int get_rand(int min, int max);
 
 // Timing functions
-long GetMilliSecondTime(struct timeb timeBuf);
+long get_millisecond_time(struct timeb timeBuf);
 
-long GetCurrentTime(void);
+long get_current_time(void);
 
-void SetTime(void);
+void set_time(void);
 
-long GetTime(void);
+long get_time(void);
 
 int main(int argc, char *argv[])
 {
   pthread_t tid[MAX_THREADS];
   pthread_attr_t attr[MAX_THREADS];
   int indices[MAX_THREADS][3];
-  int i, indexForZero, arraySize, min;
+  int index_of_zero, array_size, min;
   
   // Code for parsing and checking command-line arguments
   if (argc != 4)
@@ -72,70 +72,66 @@ int main(int argc, char *argv[])
     fprintf(stderr, "Invalid number of arguments!\n");
     exit(-1);
   }
-  if ((arraySize = atoi(argv[1])) <= 0 || arraySize > MAX_SIZE)
+  if ((array_size = atoi(argv[1])) <= 0 || array_size > MAX_SIZE)
   {
     fprintf(stderr, "Invalid Array Size\n");
     exit(-1);
   }
-  gThreadCount = atoi(argv[2]);
-  if (gThreadCount > MAX_THREADS || gThreadCount <= 0)
+  g_thread_count = atoi(argv[2]);
+  if (g_thread_count > MAX_THREADS || g_thread_count <= 0)
   {
     fprintf(stderr, "Invalid Thread Count\n");
     exit(-1);
   }
-  indexForZero = atoi(argv[3]);
-  if (indexForZero < -1 || indexForZero >= arraySize)
+  index_of_zero = atoi(argv[3]);
+  if (index_of_zero < -1 || index_of_zero >= array_size)
   {
     fprintf(stderr, "Invalid index for zero!\n");
     exit(-1);
   }
   
-  GenerateInput(arraySize, indexForZero);
+  generate_input(array_size, index_of_zero);
   
-  CalculateIndices(arraySize, gThreadCount, indices);
+  calculate_indices(array_size, g_thread_count, (int **) indices);
   
   // Code for the sequential part
-  SetTime();
-  min = SqFindMin(arraySize);
-  printf("Sequential search completed in %ld ms. Min = %d\n", GetTime(), min);
-  
+  set_time();
+  min = find_min_sequential(array_size);
+  printf("Sequential search completed in %ld ms. Min = %d\n", get_time(), min);
   
   // Threaded with parent waiting for all child threads
-  InitSharedVars();
-  SetTime();
+  init_shared_variables();
+  set_time();
   
   // Write your code here
   // Initialize threads, create threads, and then let the parent wait for all threads using pthread_join
-  // The thread start function is ThFindMin
+  // The thread start function is find_min_parallel_spin
   // Don't forget to properly initialize shared variables
   
-  
-  
-  min = SearchThreadMin();
-  printf("Threaded FindMin with parent waiting for all children completed in %ld ms. Min = %d\n", GetTime(), min);
+  min = search_thread_minima();
+  printf("Threaded FindMin with parent waiting for all children completed in %ld ms. Min = %d\n", get_time(), min);
   
   // Multi-threaded with busy waiting (parent continually checking on child threads without using semaphores)
-  InitSharedVars();
-  SetTime();
+  init_shared_variables();
+  set_time();
   
   // Write your code here
   // Don't use any semaphores in this part
   // Initialize threads, create threads, and then make the parent continually check on all child threads
-  // The thread start function is ThFindMin
+  // The thread start function is find_min_parallel_spin
   // Don't forget to properly initialize shared variables
   
-  
-  min = SearchThreadMin();
-  printf("Threaded FindMin with parent continually checking on children completed in %ld ms. Min = %d\n", GetTime(),
+  min = search_thread_minima();
+  printf("Threaded FindMin with parent continually checking on children completed in %ld ms. Min = %d\n", get_time(),
          min);
   
   
   // Multi-threaded with semaphores
   
-  InitSharedVars();
+  init_shared_variables();
   // Initialize your semaphores here
   
-  SetTime();
+  set_time();
   
   // Write your code here
   // Initialize threads, create threads, and then make the parent wait on the "completed" semaphore
@@ -144,113 +140,113 @@ int main(int argc, char *argv[])
   
   
   
-  min = SearchThreadMin();
-  printf("Threaded FindMin with parent waiting on a semaphore completed in %ld ms. Min = %d\n", GetTime(), min);
+  min = search_thread_minima();
+  printf("Threaded FindMin with parent waiting on a semaphore completed in %ld ms. Min = %d\n", get_time(), min);
 }
 
-// Write a regular sequential function to search for the minimum value in the array gData
-int SqFindMin(int size)
+// Write a regular sequential function to search for the minimum value in the array g_data
+int find_min_sequential(int size)
 {
 
 }
 
 // Write a thread function that searches for the minimum value in one division of the array
-// When it is done, this function should put the minimum in gThreadMin[threadNum] and set gThreadDone[threadNum] to true    
-void *ThFindMin(void *param)
+// When it is done, this function should put the minimum in g_thread_minima[threadNum] and set g_thread_done[threadNum] to true
+void * find_min_parallel_spin(void *param)
 {
   int threadNum = ((int *) param)[0];
   
 }
 
 // Write a thread function that searches for the minimum value in one division of the array
-// When it is done, this function should put the minimum in gThreadMin[threadNum]
+// When it is done, this function should put the minimum in g_thread_minima[threadNum]
 // If the minimum value in this division is zero, this function should post the "completed" semaphore
-// If the minimum value in this division is not zero, this function should increment gDoneThreadCount and
+// If the minimum value in this division is not zero, this function should increment g_done_thread_count and
 // post the "completed" semaphore if it is the last thread to be done
-// Don't forget to protect access to gDoneThreadCount with the "mutex" semaphore     
-void *ThFindMinWithSemaphore(void *param)
+// Don't forget to protect access to g_done_thread_count with the "mutex" semaphore
+void * ThFindMinWithSemaphore(void *param)
 {
 
 }
 
-int SearchThreadMin()
+int search_thread_minima()
 {
   int i, min = MAX_RANDOM_NUMBER + 1;
   
-  for (i = 0; i < gThreadCount; i++)
+  for (i = 0; i < g_thread_count; i++)
   {
-    if (gThreadMin[i] == 0)
+    if (g_thread_minima[i] == 0)
     {
       return 0;
     }
-    if (gThreadDone[i] == true && gThreadMin[i] < min)
+    if (g_thread_done[i] == true && g_thread_minima[i] < min)
     {
-      min = gThreadMin[i];
+      min = g_thread_minima[i];
     }
   }
   return min;
 }
 
-void InitSharedVars()
+void init_shared_variables()
 {
   int i;
   
-  for (i = 0; i < gThreadCount; i++)
+  for (i = 0; i < g_thread_count; i++)
   {
-    gThreadDone[i] = false;
-    gThreadMin[i] = MAX_RANDOM_NUMBER + 1;
+    g_thread_done[i] = false;
+    g_thread_minima[i] = MAX_RANDOM_NUMBER + 1;
   }
-  gDoneThreadCount = 0;
+  g_done_thread_count = 0;
 }
 
-// Write a function that fills the gData array with random numbers between 1 and MAX_RANDOM_NUMBER
+// Write a function that fills the g_data array with random numbers between 1 and MAX_RANDOM_NUMBER
 // If indexForZero is valid and non-negative, set the value at that index to zero 
-void GenerateInput(int size, int indexForZero)
+void generate_input(int size, int index_for_zero)
 {
 
 }
 
-// Write a function that calculates the right indices to divide the array into thrdCnt equal divisions
+// Write a function that calculates the right indices to divide the array into threadCount equal divisions
 // For each division i, indices[i][0] should be set to the division number i,
 // indices[i][1] should be set to the start index, and indices[i][2] should be set to the end index 
-void CalculateIndices(int arraySize, int thrdCnt, int indices[MAX_THREADS][3])
+void calculate_indices(int array_size, int thread_count, int **indices)
 {
 
 }
 
 // Get a random number in the range [x, y]
-int GetRand(int x, int y)
+int get_rand(int x, int y)
 {
   int r = rand();
   r = x + r % (y - x + 1);
   return r;
 }
 
-long GetMilliSecondTime(struct timeb timeBuf)
+long get_millisecond_time(struct timeb timeBuf)
 {
-  long mliScndTime;
-  mliScndTime = timeBuf.time;
-  mliScndTime *= 1000;
-  mliScndTime += timeBuf.millitm;
-  return mliScndTime;
+  long millisecond_time;
+  millisecond_time = timeBuf.time;
+  millisecond_time *= 1000;
+  millisecond_time += timeBuf.millitm;
+  return millisecond_time;
 }
 
-long GetCurrentTime(void)
+long get_current_time(void)
 {
-  long crntTime = 0;
-  struct timeb timeBuf;
-  ftime(&timeBuf);
-  crntTime = GetMilliSecondTime(timeBuf);
-  return crntTime;
+  long current_time = 0;
+  struct timeb time_buf;
+  ftime(&time_buf);
+  current_time = get_millisecond_time(time_buf);
+  return current_time;
 }
 
-void SetTime(void)
+void set_time(void)
 {
-  gRefTime = GetCurrentTime();
+  g_ref_time = get_current_time();
 }
 
-long GetTime(void)
+long get_time(void)
 {
-  long crntTime = GetCurrentTime();
-  return (crntTime - gRefTime);
+  long current_time = get_current_time();
+  return (current_time - g_ref_time);
 }
