@@ -1,252 +1,224 @@
+//===- MTFindMin.c ------------------------------------------------------------------------------------------------===//
+//
+// Author: Michael Dorst
+//
+//===--------------------------------------------------------------------------------------------------------------===//
+// CSC 139
+// Fall 2019
+// Section 2
+// Tested on: macOS 10.14, CentOS 6.10 (athena)
+//===--------------------------------------------------------------------------------------------------------------===//
+
+#include <errno.h>
+#include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <sys/timeb.h>
-#include <semaphore.h>
-#include <stdbool.h>
 
-#define MAX_SIZE 100000000
-#define MAX_THREADS 16
+#define MAX_ARRAY_SIZE 100000000
+#define MAX_THREAD_COUNT 16
 #define RANDOM_SEED 7665
 #define MAX_RANDOM_NUMBER 5000
 
-long g_ref_time;
-int g_data[MAX_SIZE];
-
-int g_thread_count;
-// Number of threads that are done at a certain point. Whenever a thread is done, it increments this.
-// Used with the semaphore-based solution
-int g_done_thread_count;
-// The minimum value found by each thread
-int g_thread_minima[MAX_THREADS];
-// Is this thread done? Used when the parent is continually checking on child threads
-bool g_thread_done[MAX_THREADS];
-
-// To notify parent that all threads have completed or one of them found a zero
-sem_t completed;
-// Binary semaphore to protect the shared variable g_done_thread_count
-sem_t mutex;
-
-// Sequential FindMin (no threads)
-int find_min_sequential(int size);
-
-// Thread FindMin but without semaphores
-void * find_min_parallel_spin(void *param);
-
-// Thread FindMin with semaphores
-void * find_min_parallel_sem(void *param);
-
-// Search all thread minima to find the minimum value found in all threads
-int search_thread_minima();
-
-void init_shared_variables();
-
-// Generate the input array
-void generate_input(int size, int index_for_zero);
-
-// Calculate the indices to divide the array into T divisions, one division per thread
-void calculate_indices(int array_size, int thread_count, int **indices);
-
-// Get a random number between min and max
-int get_rand(int min, int max);
-
-// Timing functions
-long get_millisecond_time(struct timeb timeBuf);
-
-long get_current_time(void);
-
-void set_time(void);
-
-long get_time(void);
-
-int main(int argc, char *argv[])
+/**
+ * Tracks information about a thread
+ * `done` tracks if the thread is done
+ * `minimum` tracks the minimum value found by the thread
+ * Should be initialized with `initThreadInfo()`.
+ */
+typedef struct
 {
-  pthread_t tid[MAX_THREADS];
-  pthread_attr_t attr[MAX_THREADS];
-  int indices[MAX_THREADS][3];
-  int index_of_zero, array_size, min;
-  
-  // Code for parsing and checking command-line arguments
+  bool done;
+  int minimum;
+} ThreadInfo;
+
+size_t * calculateIndices(size_t arraySize, size_t divisions)
+int * generateInput(size_t size, int indexOfZero);
+ThreadInfo initThreadInfo();
+time_t now();
+int stoi(const char * str);
+
+int main(const int argc, const char ** argv)
+{
   if (argc != 4)
   {
-    fprintf(stderr, "Invalid number of arguments!\n");
+    fprintf(stderr, "%s%s%s%s%s",
+            "Usage: MTFindMin <array_size> <num_threads> <index_of_zero>\n",
+            "array_size: The size of the array to be searched\n",
+            "num_threads: The number of threads to use\n",
+            "index_of_zero: The index in the array at which to place the zero. ",
+            "If -1, no zero will be placed.\n");
     exit(-1);
   }
-  if ((array_size = atoi(argv[1])) <= 0 || array_size > MAX_SIZE)
+  int arraySize = stoi(argv[1]);
+  if (arraySize <= 0 || arraySize > MAX_ARRAY_SIZE)
   {
-    fprintf(stderr, "Invalid Array Size\n");
+    fprintf(stderr, "array_size must be between 1 and %d\n", MAX_ARRAY_SIZE);
     exit(-1);
   }
-  g_thread_count = atoi(argv[2]);
-  if (g_thread_count > MAX_THREADS || g_thread_count <= 0)
+  int threadCount = stoi(argv[2]);
+  if (threadCount > MAX_THREAD_COUNT || threadCount < 1)
   {
-    fprintf(stderr, "Invalid Thread Count\n");
+    fprintf(stderr, "num_threads must be between 1 and %d\n", MAX_THREAD_COUNT);
     exit(-1);
   }
-  index_of_zero = atoi(argv[3]);
-  if (index_of_zero < -1 || index_of_zero >= array_size)
+  int indexOfZero = stoi(argv[3]);
+  if (indexOfZero < -1 || indexOfZero >= arraySize)
   {
-    fprintf(stderr, "Invalid index for zero!\n");
+    fprintf(stderr, "index_of_zero must be between -1 and %d (array_size - 1)\n", arraySize - 1);
     exit(-1);
   }
-  
-  generate_input(array_size, index_of_zero);
-  
-  calculate_indices(array_size, g_thread_count, (int **) indices);
-  
-  // Code for the sequential part
-  set_time();
-  min = find_min_sequential(array_size);
-  printf("Sequential search completed in %ld ms. Min = %d\n", get_time(), min);
-  
-  // Threaded with parent waiting for all child threads
-  init_shared_variables();
-  set_time();
-  
-  // Write your code here
-  // Initialize threads, create threads, and then let the parent wait for all threads using pthread_join
-  // The thread start function is find_min_parallel_spin
-  // Don't forget to properly initialize shared variables
-  
-  min = search_thread_minima();
-  printf("Threaded FindMin with parent waiting for all children completed in %ld ms. Min = %d\n", get_time(), min);
-  
-  // Multi-threaded with busy waiting (parent continually checking on child threads without using semaphores)
-  init_shared_variables();
-  set_time();
-  
-  // Write your code here
-  // Don't use any semaphores in this part
-  // Initialize threads, create threads, and then make the parent continually check on all child threads
-  // The thread start function is find_min_parallel_spin
-  // Don't forget to properly initialize shared variables
-  
-  min = search_thread_minima();
-  printf("Threaded FindMin with parent continually checking on children completed in %ld ms. Min = %d\n", get_time(),
-         min);
-  
-  
-  // Multi-threaded with semaphores
-  
-  init_shared_variables();
-  // Initialize your semaphores here
-  
-  set_time();
-  
-  // Write your code here
-  // Initialize threads, create threads, and then make the parent wait on the "completed" semaphore
-  // The thread start function is ThFindMinWithSemaphore
-  // Don't forget to properly initialize shared variables and semaphores using sem_init
-  
-  
-  
-  min = search_thread_minima();
-  printf("Threaded FindMin with parent waiting on a semaphore completed in %ld ms. Min = %d\n", get_time(), min);
+  int * data = generateInput(arraySize, indexOfZero);
+  size_t * indices = calculateIndices(arraySize, threadCount);
+  time_t startTime = now();
+  free(data);
+  free(indices);
 }
 
-// Write a regular sequential function to search for the minimum value in the array g_data
-int find_min_sequential(int size)
+int findMinInRegion(int * data, size_t start, size_t end)
 {
-
-}
-
-// Write a thread function that searches for the minimum value in one division of the array
-// When it is done, this function should put the minimum in g_thread_minima[threadNum] and set g_thread_done[threadNum] to true
-void * find_min_parallel_spin(void *param)
-{
-  int threadNum = ((int *) param)[0];
-  
-}
-
-// Write a thread function that searches for the minimum value in one division of the array
-// When it is done, this function should put the minimum in g_thread_minima[threadNum]
-// If the minimum value in this division is zero, this function should post the "completed" semaphore
-// If the minimum value in this division is not zero, this function should increment g_done_thread_count and
-// post the "completed" semaphore if it is the last thread to be done
-// Don't forget to protect access to g_done_thread_count with the "mutex" semaphore
-void * ThFindMinWithSemaphore(void *param)
-{
-
-}
-
-int search_thread_minima()
-{
-  int i, min = MAX_RANDOM_NUMBER + 1;
-  
-  for (i = 0; i < g_thread_count; i++)
+  int min = MAX_RANDOM_NUMBER + 1;
+  size_t i;
+  for (i = start; i <= end; i++)
   {
-    if (g_thread_minima[i] == 0)
+    if (data[i] == 0) return 0;
+    if (data[i] < min)
     {
-      return 0;
-    }
-    if (g_thread_done[i] == true && g_thread_minima[i] < min)
-    {
-      min = g_thread_minima[i];
+      min = data[i];
     }
   }
   return min;
 }
 
-void init_shared_variables()
+int searchThreadMinima(int threadCount, ThreadInfo * threadInfo)
 {
-  int i;
-  
-  for (i = 0; i < g_thread_count; i++)
+  int i, min = MAX_RANDOM_NUMBER + 1;
+  for (i = 0; i < threadCount; i++)
   {
-    g_thread_done[i] = false;
-    g_thread_minima[i] = MAX_RANDOM_NUMBER + 1;
+    if (threadInfo[i].minimum == 0)
+    {
+      return 0;
+    }
+    if (threadInfo[i].done && threadInfo[i].minimum < min)
+    {
+      min = threadInfo[i].minimum;
+    }
   }
-  g_done_thread_count = 0;
+  return min;
 }
 
-// Write a function that fills the g_data array with random numbers between 1 and MAX_RANDOM_NUMBER
-// If indexForZero is valid and non-negative, set the value at that index to zero 
-void generate_input(int size, int index_for_zero)
+/**
+ * Creates an array of integers between 1 and `MAX_RANDOM_NUMBER`.
+ * Places a single `0` at `indexOfZero`.
+ * Note: allocates the array dynamically - freeing is the responsibility of the caller.
+ * @param size The size of the array created
+ * @param indexOfZero The index at which to place a `0`. If -1, no zero is placed.
+ * @returns The created array
+ */
+ int * generateInput(size_t size, int indexOfZero)
 {
-
+   if (indexOfZero >= (int) size) return NULL;
+   srand(RANDOM_SEED);
+   int * array = (int *) malloc(size * sizeof(int));
+   size_t i;
+   for (i = 0; i < size; ++i)
+   {
+     array[i] = rand() % MAX_RANDOM_NUMBER + 1;
+   }
+   if (indexOfZero >= 0)
+   {
+     array[indexOfZero] = 0;
+   }
+  return array;
 }
 
-// Write a function that calculates the right indices to divide the array into threadCount equal divisions
-// For each division i, indices[i][0] should be set to the division number i,
-// indices[i][1] should be set to the start index, and indices[i][2] should be set to the end index 
-void calculate_indices(int array_size, int thread_count, int **indices)
+/**
+ * Logically splits an array into equal regions, and returns the indices of the end of each region.
+ * Note: the "equal regions" may be different in size by at most one element.
+ * @param arraySize The size of the array
+ * @param regions The number of regions
+ * @return The calculated indices (heap allocated - freeing is the responsibility of the caller)
+ */
+size_t * calculateIndices(size_t arraySize, size_t regions)
 {
-
+  size_t * indices = (size_t *) malloc(regions * sizeof(size_t));
+  int i;
+  for (i = 1; i <= regions; ++i)
+  {
+    indices[i] = i * arraySize / regions - 1;
+  }
+  return indices;
 }
 
-// Get a random number in the range [x, y]
-int get_rand(int x, int y)
+/**
+ * Get the begin index of a division
+ * @param indices The array of indices to query
+ * @param division The division you want to get the begin index of
+ * @return The index of the beginning of `division` in `array`
+ */
+int beginIndex(int * indices, size_t division)
 {
-  int r = rand();
-  r = x + r % (y - x + 1);
-  return r;
+  return indices[2 * division];
 }
 
-long get_millisecond_time(struct timeb timeBuf)
+/**
+ * Get the end index of a division
+ * @param indices The array of indices to query
+ * @param division The division you want to get the end index of
+ * @return The index of the end of `division` in `array`
+ */
+int endIndex(int * indices, size_t division)
 {
-  long millisecond_time;
-  millisecond_time = timeBuf.time;
-  millisecond_time *= 1000;
-  millisecond_time += timeBuf.millitm;
-  return millisecond_time;
+  return indices[2 * division + 1];
 }
 
-long get_current_time(void)
+time_t now()
 {
-  long current_time = 0;
-  struct timeb time_buf;
-  ftime(&time_buf);
-  current_time = get_millisecond_time(time_buf);
-  return current_time;
+  struct timeb timeBuf;
+  ftime(&timeBuf);
+  return timeBuf.time * 1000 + timeBuf.millitm;
 }
 
-void set_time(void)
+time_t timeSince(time_t time)
 {
-  g_ref_time = get_current_time();
+  return now() - time;
 }
 
-long get_time(void)
+/**
+ * Returns a `ThreadInfo` with default values.
+ */
+ThreadInfo initThreadInfo()
 {
-  long current_time = get_current_time();
-  return (current_time - g_ref_time);
+  ThreadInfo threadInfo;
+  threadInfo.done = false;
+  threadInfo.minimum = MAX_RANDOM_NUMBER + 1;
+  return threadInfo;
+}
+
+/**
+ * Serves the same function as `atoi()`, but performs a number of checks.
+ * Checks that `str` is a numeric value, and also that it is in the range of `int`
+ */
+int stoi(const char * str)
+{
+  char * end;
+  errno = 0;
+  // Use strtol because atoi does not do any error checking
+  // 10 is for base-10
+  long val = strtol(str, &end, 10);
+  // If there was an error, (if the string is not numeric)
+  if (end == str || *end != '\0' || errno == ERANGE)
+  {
+    printf("%s is not a number.\n", str);
+    exit(1);
+  }
+  // Check if val is outside of int range
+  if (val < INT_MIN || val > INT_MAX)
+  {
+    printf("%s has too many digits.\n", str);
+    exit(1);
+  }
+  // Casting long to int is now safe
+  return (int) val;
 }
