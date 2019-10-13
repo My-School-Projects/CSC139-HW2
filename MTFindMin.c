@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +23,7 @@
 #define MAX_RANDOM_NUMBER 5000
 
 /**
- * Tracks information about a thread
+ * Tracks information about a thread.
  * `done` tracks if the thread is done
  * `minimum` tracks the minimum value found by the thread
  * Should be initialized with `initThreadInfo()`.
@@ -33,11 +34,29 @@ typedef struct
   int minimum;
 } ThreadInfo;
 
-size_t * calculateIndices(size_t arraySize, size_t divisions)
+/**
+ * Represents the region `[begin, end)` in the array `data`.
+ * `data` is a pointer to an array.
+ * `begin` is the beginning of the region (inclusive).
+ * `end` is the end of the region (exclusive).
+ */
+typedef struct
+{
+  int const * data;
+  size_t begin;
+  size_t end;
+} DataRegion;
+
+int findMinInRegion(int const * data, size_t begin, size_t end);
+int findMinSequential(int const * data, size_t size);
+void * findMinThreaded(void * region);
+DataRegion * getRegions(int const * data, size_t arraySize, size_t regionCount);
 int * generateInput(size_t size, int indexOfZero);
 ThreadInfo initThreadInfo();
 time_t now();
-int stoi(const char * str);
+int searchThreadMinima(int threadCount, ThreadInfo const * threadInfo);
+int stoi(char const * str);
+time_t timeSince(time_t time);
 
 int main(const int argc, const char ** argv)
 {
@@ -70,17 +89,72 @@ int main(const int argc, const char ** argv)
     exit(-1);
   }
   int * data = generateInput(arraySize, indexOfZero);
-  size_t * indices = calculateIndices(arraySize, threadCount);
+  DataRegion * regions = getRegions(data, arraySize, threadCount);
+  // Sequential:
   time_t startTime = now();
+  int min = findMinSequential(data, arraySize);
+  printf("Sequential search completed in %ld ms. Min = %d\n", timeSince(startTime), min);
+  // Threaded with parent waiting for all child threads:
+  startTime = now();
+  int i;
+  pthread_t threads[threadCount];
+  for (i = 0; i < threadCount; ++i)
+  {
+    pthread_create(&threads[i], NULL, findMinThreaded, &regions[i]);
+  }
+  min = MAX_RANDOM_NUMBER + 1;
+  for (i = 0; i < threadCount; ++i)
+  {
+    int * thread_min;
+    pthread_join(threads[i], (void **) &thread_min);
+    if (*thread_min < min)
+    {
+      min = *thread_min;
+    }
+  }
+  printf("Threaded search with parent waiting for all children completed in %ld ms. Min = %d\n", timeSince(startTime),
+         min);
   free(data);
-  free(indices);
+  free(regions);
 }
 
-int findMinInRegion(int * data, size_t start, size_t end)
+/**
+ * Find the minimum value in `data`. Single threaded.
+ * @param data The data to be searched
+ * @param size The size of `data`
+ * @return The minimum value in `data`
+ */
+int findMinSequential(int const * const data, size_t size)
+{
+  return findMinInRegion(data, 0, size);
+}
+
+/**
+ * Find the minimum value in `data`. Multi threaded. No early exit.
+ * @param region The region of `data` to search
+ * @return The minimum value in the specified region of `data`
+ */
+void * findMinThreaded(void * region)
+{
+  DataRegion reg = *(DataRegion *) region;
+  int * min = (int *) malloc(sizeof(int *));
+  *min = findMinInRegion(reg.data, reg.begin, reg.end);
+  return min;
+}
+
+/**
+ * Find the minimum value in the given region of `data`
+ * The region to be searched is specified by `[begin, end)`.
+ * @param data The data to be searched
+ * @param begin The index of the beginning of the region to search (inclusive)
+ * @param end The index of the end of the region to search (exclusive)
+ * @return The minimum value in the region `[begin, end)` of `data`
+ */
+int findMinInRegion(int const * data, size_t begin, size_t end)
 {
   int min = MAX_RANDOM_NUMBER + 1;
   size_t i;
-  for (i = start; i <= end; i++)
+  for (i = begin; i < end; ++i)
   {
     if (data[i] == 0) return 0;
     if (data[i] < min)
@@ -91,7 +165,7 @@ int findMinInRegion(int * data, size_t start, size_t end)
   return min;
 }
 
-int searchThreadMinima(int threadCount, ThreadInfo * threadInfo)
+int searchThreadMinima(int threadCount, ThreadInfo const * threadInfo)
 {
   int i, min = MAX_RANDOM_NUMBER + 1;
   for (i = 0; i < threadCount; i++)
@@ -116,61 +190,42 @@ int searchThreadMinima(int threadCount, ThreadInfo * threadInfo)
  * @param indexOfZero The index at which to place a `0`. If -1, no zero is placed.
  * @returns The created array
  */
- int * generateInput(size_t size, int indexOfZero)
+int * generateInput(size_t size, int indexOfZero)
 {
-   if (indexOfZero >= (int) size) return NULL;
-   srand(RANDOM_SEED);
-   int * array = (int *) malloc(size * sizeof(int));
-   size_t i;
-   for (i = 0; i < size; ++i)
-   {
-     array[i] = rand() % MAX_RANDOM_NUMBER + 1;
-   }
-   if (indexOfZero >= 0)
-   {
-     array[indexOfZero] = 0;
-   }
+  if (indexOfZero >= (int) size) return NULL;
+  srand(RANDOM_SEED);
+  int * array = (int *) malloc(size * sizeof(int));
+  size_t i;
+  for (i = 0; i < size; ++i)
+  {
+    array[i] = rand() % MAX_RANDOM_NUMBER + 1;
+  }
+  if (indexOfZero >= 0)
+  {
+    array[indexOfZero] = 0;
+  }
   return array;
 }
 
 /**
- * Logically splits an array into equal regions, and returns the indices of the end of each region.
- * Note: the "equal regions" may be different in size by at most one element.
+ * Logically splits an array into ^equal sized regions.
+ * ^Regions may be different in size by at most one.
+ * e.g. given `arraySize = 10` and `regions = 3`, returns the regions `{ [0, 3), [3, 6), [6, 10) }`.
  * @param arraySize The size of the array
- * @param regions The number of regions
- * @return The calculated indices (heap allocated - freeing is the responsibility of the caller)
+ * @param regionCount The number of regions
+ * @return The calculated regions (heap allocated - freeing is the responsibility of the caller)
  */
-size_t * calculateIndices(size_t arraySize, size_t regions)
+DataRegion * getRegions(int const * data, size_t arraySize, size_t regionCount)
 {
-  size_t * indices = (size_t *) malloc(regions * sizeof(size_t));
-  int i;
-  for (i = 1; i <= regions; ++i)
+  DataRegion * regions = (DataRegion *) malloc(regionCount * sizeof(DataRegion));
+  size_t i;
+  for (i = 0; i < regionCount; ++i)
   {
-    indices[i] = i * arraySize / regions - 1;
+    regions[i].data = data;
+    regions[i].begin = i * arraySize / regionCount;
+    regions[i].end = (i + 1) * arraySize / regionCount;
   }
-  return indices;
-}
-
-/**
- * Get the begin index of a division
- * @param indices The array of indices to query
- * @param division The division you want to get the begin index of
- * @return The index of the beginning of `division` in `array`
- */
-int beginIndex(int * indices, size_t division)
-{
-  return indices[2 * division];
-}
-
-/**
- * Get the end index of a division
- * @param indices The array of indices to query
- * @param division The division you want to get the end index of
- * @return The index of the end of `division` in `array`
- */
-int endIndex(int * indices, size_t division)
-{
-  return indices[2 * division + 1];
+  return regions;
 }
 
 time_t now()
@@ -200,7 +255,7 @@ ThreadInfo initThreadInfo()
  * Serves the same function as `atoi()`, but performs a number of checks.
  * Checks that `str` is a numeric value, and also that it is in the range of `int`
  */
-int stoi(const char * str)
+int stoi(char const * str)
 {
   char * end;
   errno = 0;
