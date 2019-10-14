@@ -119,6 +119,7 @@ int main(const int argc, const char ** argv)
     if (searchThreadMinima(threadCount, threadInfo) == 0)
     {
       cancelAll(threads, threadCount);
+      joinAll(threads, threadCount);
       break;
     }
   }
@@ -192,6 +193,7 @@ int findMinInRegion(int const * data, size_t begin, size_t end)
   size_t i;
   for (i = begin; i < end; ++i)
   {
+    pthread_testcancel();
     if (data[i] == 0) return 0;
     if (data[i] < min)
     {
