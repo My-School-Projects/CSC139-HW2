@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,19 @@
 #define MAX_THREAD_COUNT 16
 #define RANDOM_SEED 7665
 #define MAX_RANDOM_NUMBER 5000
+
+/**
+ * The shared state of all threads - should be instantiated once and passed to each `ThreadInfo` instance.
+ * `searchDone` is a binary semaphore that signals when all threads are done, or one finds a zero.
+ * `doneThreadCountMutex` is a binary semaphore which acts as a mutex to protect access to `doneThreadCount`.
+ * `doneThreadCount` is the number of threads that are done searching.
+ */
+typedef struct
+{
+  sem_t searchDone;
+  sem_t doneThreadCountMutex;
+  size_t doneThreadCount;
+} SharedState;
 
 /**
  * Tracks information about a thread.
@@ -37,15 +51,17 @@ typedef struct
   int minimum;
   size_t begin_region;
   size_t end_region;
+  SharedState const * sharedState;
 } ThreadInfo;
 
 bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo);
 void cancelAll(pthread_t const * threads, size_t threadCount);
-ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount);
+ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount, SharedState const * sharedState);
 int findMinInRegion(int const * data, size_t begin, size_t end);
 int findMinSequential(int const * data, size_t size);
 void * findMinThreaded(void * region);
 int * generateInput(size_t size, int indexOfZero);
+SharedState initSharedState();
 void joinAll(pthread_t const * threads, size_t threadCount);
 time_t now();
 int searchThreadMinima(size_t threadCount, ThreadInfo const * threadInfo);
@@ -92,7 +108,7 @@ int main(const int argc, const char ** argv)
   
   // Threaded with parent waiting for all child threads:
   pthread_t threads[threadCount];
-  ThreadInfo * threadInfo = computeThreadInfo(data, arraySize, threadCount);
+  ThreadInfo * threadInfo = computeThreadInfo(data, arraySize, threadCount, NULL);
   startTime = now();
   startAll(threads, threadInfo, threadCount, findMinThreaded);
   joinAll(threads, threadCount);
@@ -101,7 +117,8 @@ int main(const int argc, const char ** argv)
          min);
   free(threadInfo);
   // Threaded with parent busy waiting
-  threadInfo = computeThreadInfo(data, arraySize, threadCount);
+  SharedState sharedState = initSharedState();
+  threadInfo = computeThreadInfo(data, arraySize, threadCount, &sharedState);
   startTime = now();
   startAll(threads, threadInfo, threadCount, findMinThreaded);
   while (!allThreadsDone(threadCount, threadInfo))
@@ -154,7 +171,7 @@ void cancelAll(pthread_t const * threads, size_t threadCount)
  * @param threadCount The number of threads (and the number of `ThreadInfo` structs to create)
  * @return An array of size `threadCount` (heap allocated - freeing is the responsibility of the caller)
  */
-ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount)
+ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount, SharedState const * sharedState)
 {
   ThreadInfo * threadInfo = (ThreadInfo *) malloc(threadCount * sizeof(ThreadInfo));
   size_t i;
@@ -165,6 +182,7 @@ ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t thread
     threadInfo[i].minimum = MAX_RANDOM_NUMBER + 1;
     threadInfo[i].begin_region = i * arraySize / threadCount;
     threadInfo[i].end_region= (i + 1) * arraySize / threadCount;
+    threadInfo[i].sharedState = sharedState;
   }
   return threadInfo;
 }
@@ -240,6 +258,15 @@ int * generateInput(size_t size, int indexOfZero)
     array[indexOfZero] = 0;
   }
   return array;
+}
+
+SharedState initSharedState()
+{
+  SharedState sharedState;
+  sem_init(&sharedState.searchDone, 0, 1);
+  sem_init(&sharedState.doneThreadCountMutex, 0, 1);
+  sharedState.doneThreadCount = 0;
+  return sharedState;
 }
 
 /**
