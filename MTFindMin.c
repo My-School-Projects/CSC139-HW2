@@ -109,8 +109,9 @@ int main(const int argc, const char ** argv)
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent waiting for all children completed in %ld ms. Min = %d\n", timeSince(startTime),
          min);
-  
+  free(threadInfo);
   // Threaded with parent busy waiting
+  threadInfo = computeThreadInfo(data, arraySize, threadCount);
   startTime = now();
   startAll(threads, threadInfo, threadCount, findMinThreaded);
   while (!allThreadsDone(threadCount, threadInfo))
@@ -124,8 +125,8 @@ int main(const int argc, const char ** argv)
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent continually checking on children completed in %ld ms. Min = %d\n",
          timeSince(startTime), min);
-  free(data);
   free(threadInfo);
+  free(data);
 }
 
 /**
@@ -280,7 +281,8 @@ time_t now()
  */
 int searchThreadMinima(size_t threadCount, ThreadInfo const * threadInfo)
 {
-  int i, min = MAX_RANDOM_NUMBER + 1;
+  int min = MAX_RANDOM_NUMBER + 1;
+  size_t i;
   for (i = 0; i < threadCount; i++)
   {
     if (threadInfo[i].minimum == 0)
