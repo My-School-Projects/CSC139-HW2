@@ -129,6 +129,19 @@ int main(const int argc, const char ** argv)
 }
 
 /**
+ * Returns `true` if all threads are done.
+ */
+bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo)
+{
+  size_t i;
+  for (i = 0; i < threadCount; ++i)
+  {
+    if (!threadInfo[i].done) return false;
+  }
+  return true;
+}
+
+/**
  * Calls `pthread_cancel` on every thread in `threads`.
  * @param threads The threads to be cancelled
  * @param threadCount The number of threads in `threads`
@@ -143,57 +156,25 @@ void cancelAll(pthread_t const * threads, size_t threadCount)
 }
 
 /**
- * Calls `pthread_join` on every thread in `threads`.
- * @param threads The threads to be joined
- * @param threadCount The number of threads in `threads`
+ * Generates a heap allocated array of `ThreadInfo` - one for each thread.
+ * @param data The data the threads will be operating on
+ * @param arraySize The size of `data`
+ * @param threadCount The number of threads (and the number of `ThreadInfo` structs to create)
+ * @return An array of size `threadCount` (heap allocated - freeing is the responsibility of the caller)
  */
-void joinAll(pthread_t const * threads, size_t threadCount)
+ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount)
 {
+  ThreadInfo * threadInfo = (ThreadInfo *) malloc(threadCount * sizeof(ThreadInfo));
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    pthread_join(threads[i], NULL);
+    threadInfo[i].done = false;
+    threadInfo[i].data = data;
+    threadInfo[i].minimum = MAX_RANDOM_NUMBER + 1;
+    threadInfo[i].region.begin = i * arraySize / threadCount;
+    threadInfo[i].region.end = (i + 1) * arraySize / threadCount;
   }
-}
-
-/**
- * Starts all threads.
- * @param threads An array of thread handles
- * @param threadInfo An array of thread information
- * @param threadCount The number of threads
- * @param f The function to run
- */
-void startAll(pthread_t * threads, ThreadInfo * threadInfo, size_t threadCount, void * (* f)(void *))
-{
-  size_t i;
-  for (i = 0; i < threadCount; ++i)
-  {
-    pthread_create(&threads[i], NULL, f, &threadInfo[i]);
-  }
-}
-
-/**
- * Find the minimum value in `data`. Single threaded.
- * @param data The data to be searched
- * @param size The size of `data`
- * @return The minimum value in `data`
- */
-int findMinSequential(int const * const data, size_t size)
-{
-  return findMinInRegion(data, 0, size);
-}
-
-/**
- * Find the minimum value in `data`. Multi threaded. No early exit.
- * @param region The region of `data` to search
- * @return The minimum value in the specified region of `data`
- */
-void * findMinThreaded(void * threadInfo)
-{
-  ThreadInfo * ti = (ThreadInfo *) threadInfo;
-  ti->minimum = findMinInRegion(ti->data, ti->region.begin, ti->region.end);
-  ti->done = true;
-  return NULL;
+  return threadInfo;
 }
 
 /**
@@ -220,38 +201,27 @@ int findMinInRegion(int const * data, size_t begin, size_t end)
 }
 
 /**
- * Returns the minimum number found by all threads.
- * @param threadCount The number of threads that were searching
- * @param threadInfo An array of size `threadCount` with information about each thread
+ * Find the minimum value in `data`. Single threaded.
+ * @param data The data to be searched
+ * @param size The size of `data`
+ * @return The minimum value in `data`
  */
-int searchThreadMinima(size_t threadCount, ThreadInfo const * threadInfo)
+int findMinSequential(int const * const data, size_t size)
 {
-  int i, min = MAX_RANDOM_NUMBER + 1;
-  for (i = 0; i < threadCount; i++)
-  {
-    if (threadInfo[i].minimum == 0)
-    {
-      return 0;
-    }
-    if (threadInfo[i].done && threadInfo[i].minimum < min)
-    {
-      min = threadInfo[i].minimum;
-    }
-  }
-  return min;
+  return findMinInRegion(data, 0, size);
 }
 
 /**
- * Returns `true` if all threads are done.
+ * Find the minimum value in `data`. Multi threaded. No early exit.
+ * @param region The region of `data` to search
+ * @return The minimum value in the specified region of `data`
  */
-bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo)
+void * findMinThreaded(void * threadInfo)
 {
-  size_t i;
-  for (i = 0; i < threadCount; ++i)
-  {
-    if (!threadInfo[i].done) return false;
-  }
-  return true;
+  ThreadInfo * ti = (ThreadInfo *) threadInfo;
+  ti->minimum = findMinInRegion(ti->data, ti->region.begin, ti->region.end);
+  ti->done = true;
+  return NULL;
 }
 
 /**
@@ -280,25 +250,17 @@ int * generateInput(size_t size, int indexOfZero)
 }
 
 /**
- * Generates a heap allocated array of `ThreadInfo` - one for each thread.
- * @param data The data the threads will be operating on
- * @param arraySize The size of `data`
- * @param threadCount The number of threads (and the number of `ThreadInfo` structs to create)
- * @return An array of size `threadCount` (heap allocated - freeing is the responsibility of the caller)
+ * Calls `pthread_join` on every thread in `threads`.
+ * @param threads The threads to be joined
+ * @param threadCount The number of threads in `threads`
  */
-ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount)
+void joinAll(pthread_t const * threads, size_t threadCount)
 {
-  ThreadInfo * threadInfo = (ThreadInfo *) malloc(threadCount * sizeof(ThreadInfo));
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    threadInfo[i].done = false;
-    threadInfo[i].data = data;
-    threadInfo[i].minimum = MAX_RANDOM_NUMBER + 1;
-    threadInfo[i].region.begin = i * arraySize / threadCount;
-    threadInfo[i].region.end = (i + 1) * arraySize / threadCount;
+    pthread_join(threads[i], NULL);
   }
-  return threadInfo;
 }
 
 /**
@@ -312,11 +274,41 @@ time_t now()
 }
 
 /**
- * Returns the number of milliseconds that have passed since `time`.
+ * Returns the minimum number found by all threads.
+ * @param threadCount The number of threads that were searching
+ * @param threadInfo An array of size `threadCount` with information about each thread
  */
-time_t timeSince(time_t time)
+int searchThreadMinima(size_t threadCount, ThreadInfo const * threadInfo)
 {
-  return now() - time;
+  int i, min = MAX_RANDOM_NUMBER + 1;
+  for (i = 0; i < threadCount; i++)
+  {
+    if (threadInfo[i].minimum == 0)
+    {
+      return 0;
+    }
+    if (threadInfo[i].done && threadInfo[i].minimum < min)
+    {
+      min = threadInfo[i].minimum;
+    }
+  }
+  return min;
+}
+
+/**
+ * Starts all threads.
+ * @param threads An array of thread handles
+ * @param threadInfo An array of thread information
+ * @param threadCount The number of threads
+ * @param f The function to run
+ */
+void startAll(pthread_t * threads, ThreadInfo * threadInfo, size_t threadCount, void * (* f)(void *))
+{
+  size_t i;
+  for (i = 0; i < threadCount; ++i)
+  {
+    pthread_create(&threads[i], NULL, f, &threadInfo[i]);
+  }
 }
 
 /**
@@ -344,4 +336,12 @@ int stoi(char const * str)
   }
   // Casting long to int is now safe
   return (int) val;
+}
+
+/**
+ * Returns the number of milliseconds that have passed since `time`.
+ */
+time_t timeSince(time_t time)
+{
+  return now() - time;
 }
