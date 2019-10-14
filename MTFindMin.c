@@ -23,17 +23,6 @@
 #define MAX_RANDOM_NUMBER 5000
 
 /**
- * Represents the region `[begin, end)` of an array.
- * `begin` is the beginning of the region (inclusive).
- * `end` is the end of the region (exclusive).
- */
-typedef struct
-{
-  size_t begin;
-  size_t end;
-} DataRegion;
-
-/**
  * Tracks information about a thread.
  * `done` tracks if the thread is done
  * `data` is the array the thread is searching
@@ -46,7 +35,8 @@ typedef struct
   bool done;
   int const * data;
   int minimum;
-  DataRegion region;
+  size_t begin_region;
+  size_t end_region;
 } ThreadInfo;
 
 bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo);
@@ -173,8 +163,8 @@ ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t thread
     threadInfo[i].done = false;
     threadInfo[i].data = data;
     threadInfo[i].minimum = MAX_RANDOM_NUMBER + 1;
-    threadInfo[i].region.begin = i * arraySize / threadCount;
-    threadInfo[i].region.end = (i + 1) * arraySize / threadCount;
+    threadInfo[i].begin_region = i * arraySize / threadCount;
+    threadInfo[i].end_region= (i + 1) * arraySize / threadCount;
   }
   return threadInfo;
 }
@@ -222,7 +212,7 @@ int findMinSequential(int const * const data, size_t size)
 void * findMinThreaded(void * threadInfo)
 {
   ThreadInfo * ti = (ThreadInfo *) threadInfo;
-  ti->minimum = findMinInRegion(ti->data, ti->region.begin, ti->region.end);
+  ti->minimum = findMinInRegion(ti->data, ti->begin_region, ti->end_region);
   ti->done = true;
   return NULL;
 }
