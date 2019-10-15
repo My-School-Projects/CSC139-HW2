@@ -6,7 +6,7 @@
 // CSC 139
 // Fall 2019
 // Section 2
-// Tested on: macOS 10.14, CentOS 6.10 (athena)
+// Tested on: macOS 10.14 (partially - macOS does not support unnamed POSIX semaphores), CentOS 6.10 (athena)
 //===--------------------------------------------------------------------------------------------------------------===//
 
 #include <errno.h>
@@ -181,7 +181,11 @@ void cancelAll(pthread_t const * threads, size_t threadCount)
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    pthread_cancel(threads[i]);
+    if (pthread_cancel(threads[i]))
+    {
+      perror("pthread_cancel");
+      exit(1);
+    }
   }
 }
 
@@ -266,6 +270,7 @@ void * findMinThreadedWithSemaphore(void * threadInfo)
     perror("sem_getvalue");
     exit(1);
   }
+  printf("searchDone: %d\n", searchDone);
   if (searchDone == 0) return NULL;
   if (sem_wait(&ti->sharedState->doneThreadCountMutex))
   {
@@ -278,6 +283,7 @@ void * findMinThreadedWithSemaphore(void * threadInfo)
     perror("sem_post");
     exit(1);
   }
+  printf("doneThreadCount: %lu\n", doneThreadCount);
   if (doneThreadCount == ti->sharedState->threadCount)
   {
     if (sem_post(&ti->sharedState->searchDone))
@@ -355,7 +361,11 @@ void joinAll(pthread_t const * threads, size_t threadCount)
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    pthread_join(threads[i], NULL);
+    if (pthread_join(threads[i], NULL))
+    {
+      perror("pthread_join");
+      exit(1);
+    }
   }
 }
 
@@ -404,7 +414,11 @@ void startAll(pthread_t * threads, ThreadInfo * threadInfo, size_t threadCount, 
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    pthread_create(&threads[i], NULL, f, &threadInfo[i]);
+    if (pthread_create(&threads[i], NULL, f, &threadInfo[i]))
+    {
+      perror("pthread_create");
+      exit(1);
+    }
   }
 }
 
