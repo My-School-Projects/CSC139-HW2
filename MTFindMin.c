@@ -140,6 +140,8 @@ int main(const int argc, const char ** argv)
   startTime = now();
   startAll(threads, threadInfo, threadCount, findMinThreadedWithSemaphore);
   sem_wait(&sharedState.searchDone);
+  cancelAll(threads, threadCount);
+  joinAll(threads, threadCount);
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent waiting on a semaphore completed in %ld ms. Min = %d\n", timeSince(startTime),
          min);
