@@ -62,6 +62,7 @@ int findMinInRegion(int const * data, size_t begin, size_t end);
 int findMinSequential(int const * data, size_t size);
 void * findMinThreaded(void * region);
 void * findMinThreadedWithSemaphore(void * threadInfo);
+void freeSharedState(SharedState * sharedState);
 int * generateInput(size_t size, int indexOfZero);
 SharedState initSharedState(size_t threadCount);
 void joinAll(pthread_t const * threads, size_t threadCount);
@@ -118,6 +119,7 @@ int main(const int argc, const char ** argv)
   printf("Threaded search with parent waiting for all children completed in %ld ms. Min = %d\n", timeSince(startTime),
          min);
   free(threadInfo);
+  
   // Threaded with parent busy waiting
   threadInfo = computeThreadInfo(data, arraySize, threadCount, NULL);
   startTime = now();
@@ -135,16 +137,23 @@ int main(const int argc, const char ** argv)
   printf("Threaded search with parent continually checking on children completed in %ld ms. Min = %d\n",
          timeSince(startTime), min);
   free(threadInfo);
+  
+  // Threaded with parent waiting on semaphore
   SharedState sharedState = initSharedState(threadCount);
   threadInfo = computeThreadInfo(data, arraySize, threadCount, &sharedState);
   startTime = now();
   startAll(threads, threadInfo, threadCount, findMinThreadedWithSemaphore);
-  sem_wait(&sharedState.searchDone);
+  if (sem_wait(&sharedState.searchDone))
+  {
+    perror("sem_wait");
+    exit(1);
+  }
   cancelAll(threads, threadCount);
   joinAll(threads, threadCount);
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent waiting on a semaphore completed in %ld ms. Min = %d\n", timeSince(startTime),
          min);
+  freeSharedState(&sharedState);
   free(threadInfo);
   free(data);
 }
@@ -252,16 +261,44 @@ void * findMinThreadedWithSemaphore(void * threadInfo)
   ThreadInfo * ti = (ThreadInfo *) threadInfo;
   ti->minimum = findMinInRegion(ti->data, ti->begin_region, ti->end_region);
   int searchDone;
-  sem_getvalue(&ti->sharedState->searchDone, &searchDone);
-  if (searchDone) return NULL;
-  sem_wait(&ti->sharedState->doneThreadCountMutex);
+  if (sem_getvalue(&ti->sharedState->searchDone, &searchDone))
+  {
+    perror("sem_getvalue");
+    exit(1);
+  }
+  if (searchDone == 0) return NULL;
+  if (sem_wait(&ti->sharedState->doneThreadCountMutex))
+  {
+    perror("sem_wait");
+    exit(1);
+  }
   size_t doneThreadCount = ++ti->sharedState->doneThreadCount;
-  sem_post(&ti->sharedState->doneThreadCountMutex);
+  if (sem_post(&ti->sharedState->doneThreadCountMutex))
+  {
+    perror("sem_post");
+    exit(1);
+  }
   if (doneThreadCount == ti->sharedState->threadCount)
   {
-    sem_post(&ti->sharedState->searchDone);
+    if (sem_post(&ti->sharedState->searchDone))
+    {
+      perror("sem_post");
+      exit(1);
+    }
   }
   return NULL;
+}
+
+void freeSharedState(SharedState * sharedState)
+{
+  if (sem_destroy(&sharedState->searchDone))
+  {
+    perror("sem_destroy");
+  }
+  if (sem_destroy(&sharedState->doneThreadCountMutex))
+  {
+    perror("sem_destroy");
+  }
 }
 
 /**
@@ -292,8 +329,17 @@ int * generateInput(size_t size, int indexOfZero)
 SharedState initSharedState(size_t threadCount)
 {
   SharedState sharedState;
-  sem_init(&sharedState.searchDone, 0, 1);
-  sem_init(&sharedState.doneThreadCountMutex, 0, 1);
+  // shared = false, value = 1
+  if (sem_init(&sharedState.searchDone, false, 1))
+  {
+    perror("sem_init");
+    exit(1);
+  }
+  if (sem_init(&sharedState.doneThreadCountMutex, false, 1))
+  {
+    perror("sem_init");
+    exit(1);
+  }
   sharedState.doneThreadCount = 0;
   sharedState.threadCount = threadCount;
   return sharedState;
