@@ -53,11 +53,11 @@ typedef struct
   size_t begin_region;
   size_t end_region;
   SharedState * sharedState;
-  pthread_t * threadHandle;
+  pthread_t threadHandle;
 } ThreadInfo;
 
 bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo);
-void cancelAll(pthread_t const * threads, ThreadInfo const * threadInfo, size_t threadCount);
+void cancelAll(ThreadInfo * threadInfo, size_t threadCount);
 ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount, SharedState * sharedState);
 int findMinInRegion(int const * data, size_t begin, size_t end);
 int findMinSequential(int const * data, size_t size);
@@ -66,10 +66,10 @@ void * findMinThreadedWithSemaphore(void * threadInfo);
 void freeSharedState(SharedState * sharedState);
 int * generateInput(size_t size, int indexOfZero);
 SharedState initSharedState(size_t threadCount);
-void joinAll(pthread_t const * threads, size_t threadCount);
+void joinAll(ThreadInfo const * threadInfo, size_t threadCount);
 time_t now();
 int searchThreadMinima(size_t threadCount, ThreadInfo const * threadInfo);
-void startAll(pthread_t * threads, ThreadInfo * threadInfo, size_t threadCount, void * (* f)(void *));
+void startAll(ThreadInfo * threadInfo, size_t threadCount, void * (* f)(void *));
 int stoi(char const * str);
 time_t timeSince(time_t time);
 
@@ -111,11 +111,10 @@ int main(const int argc, const char ** argv)
   printf("Sequential search completed in %ld ms. Min = %d\n", timeSince(startTime), min);
   
   // Threaded with parent waiting for all child threads:
-  pthread_t * threads = malloc(threadCount * sizeof(pthread_t));
   ThreadInfo * threadInfo = computeThreadInfo(data, arraySize, threadCount, NULL);
   startTime = now();
-  startAll(threads, threadInfo, threadCount, findMinThreaded);
-  joinAll(threads, threadCount);
+  startAll(threadInfo, threadCount, findMinThreaded);
+  joinAll(threadInfo, threadCount);
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent waiting for all children completed in %ld ms. Min = %d\n", timeSince(startTime),
          min);
@@ -124,13 +123,13 @@ int main(const int argc, const char ** argv)
   // Threaded with parent busy waiting
   threadInfo = computeThreadInfo(data, arraySize, threadCount, NULL);
   startTime = now();
-  startAll(threads, threadInfo, threadCount, findMinThreaded);
+  startAll(threadInfo, threadCount, findMinThreaded);
   while (!allThreadsDone(threadCount, threadInfo))
   {
     if (searchThreadMinima(threadCount, threadInfo) == 0)
     {
-      cancelAll(threads, threadInfo, threadCount);
-      joinAll(threads, threadCount);
+      cancelAll(threadInfo, threadCount);
+      joinAll(threadInfo, threadCount);
       break;
     }
   }
@@ -143,19 +142,18 @@ int main(const int argc, const char ** argv)
   SharedState sharedState = initSharedState(threadCount);
   threadInfo = computeThreadInfo(data, arraySize, threadCount, &sharedState);
   startTime = now();
-  startAll(threads, threadInfo, threadCount, findMinThreadedWithSemaphore);
+  startAll(threadInfo, threadCount, findMinThreadedWithSemaphore);
   if (sem_wait(&sharedState.searchDone))
   {
     perror("sem_wait");
     exit(1);
   }
-  cancelAll(threads, threadInfo, threadCount);
-  joinAll(threads, threadCount);
+  cancelAll(threadInfo, threadCount);
+  joinAll(threadInfo, threadCount);
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent waiting on a semaphore completed in %ld ms. Min = %d\n", timeSince(startTime),
          min);
   freeSharedState(&sharedState);
-  free(threads);
   free(threadInfo);
   free(data);
   return 0;
@@ -179,12 +177,12 @@ bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo)
  * @param threads The threads to be cancelled
  * @param threadCount The number of threads in `threads`
  */
-void cancelAll(pthread_t const * threads, ThreadInfo const * threadInfo, size_t threadCount)
+void cancelAll(ThreadInfo * threadInfo, size_t threadCount)
 {
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    if (!threadInfo[i].done && pthread_cancel(threads[i]))
+    if (!threadInfo[i].done && pthread_cancel(threadInfo[i].threadHandle))
     {
       fprintf(stderr, "Tried to cancel a thread that does not exist.\n");
       exit(1);
@@ -359,12 +357,12 @@ SharedState initSharedState(size_t threadCount)
  * @param threads The threads to be joined
  * @param threadCount The number of threads in `threads`
  */
-void joinAll(pthread_t const * threads, size_t threadCount)
+void joinAll(ThreadInfo const * threadInfo, size_t threadCount)
 {
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    if (pthread_join(threads[i], NULL))
+    if (pthread_join(threadInfo[i].threadHandle, NULL))
     {
       perror("pthread_join");
       exit(1);
@@ -412,12 +410,12 @@ int searchThreadMinima(size_t threadCount, ThreadInfo const * threadInfo)
  * @param threadCount The number of threads
  * @param f The function to run
  */
-void startAll(pthread_t * threads, ThreadInfo * threadInfo, size_t threadCount, void * (* f)(void *))
+void startAll(ThreadInfo * threadInfo, size_t threadCount, void * (* f)(void *))
 {
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    if (pthread_create(&threads[i], NULL, f, &threadInfo[i]))
+    if (pthread_create(&threadInfo[i].threadHandle, NULL, f, &threadInfo[i]))
     {
       perror("pthread_create");
       exit(1);
