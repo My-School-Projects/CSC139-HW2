@@ -53,10 +53,11 @@ typedef struct
   size_t begin_region;
   size_t end_region;
   SharedState * sharedState;
+  pthread_t * threadHandle;
 } ThreadInfo;
 
 bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo);
-void cancelAll(pthread_t const * threads, size_t threadCount);
+void cancelAll(pthread_t const * threads, ThreadInfo const * threadInfo, size_t threadCount);
 ThreadInfo * computeThreadInfo(int const * data, size_t arraySize, size_t threadCount, SharedState * sharedState);
 int findMinInRegion(int const * data, size_t begin, size_t end);
 int findMinSequential(int const * data, size_t size);
@@ -110,7 +111,7 @@ int main(const int argc, const char ** argv)
   printf("Sequential search completed in %ld ms. Min = %d\n", timeSince(startTime), min);
   
   // Threaded with parent waiting for all child threads:
-  pthread_t threads[threadCount];
+  pthread_t * threads = malloc(threadCount * sizeof(pthread_t));
   ThreadInfo * threadInfo = computeThreadInfo(data, arraySize, threadCount, NULL);
   startTime = now();
   startAll(threads, threadInfo, threadCount, findMinThreaded);
@@ -128,7 +129,7 @@ int main(const int argc, const char ** argv)
   {
     if (searchThreadMinima(threadCount, threadInfo) == 0)
     {
-      cancelAll(threads, threadCount);
+      cancelAll(threads, threadInfo, threadCount);
       joinAll(threads, threadCount);
       break;
     }
@@ -148,14 +149,16 @@ int main(const int argc, const char ** argv)
     perror("sem_wait");
     exit(1);
   }
-  cancelAll(threads, threadCount);
+  cancelAll(threads, threadInfo, threadCount);
   joinAll(threads, threadCount);
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent waiting on a semaphore completed in %ld ms. Min = %d\n", timeSince(startTime),
          min);
   freeSharedState(&sharedState);
+  free(threads);
   free(threadInfo);
   free(data);
+  return 0;
 }
 
 /**
@@ -176,14 +179,14 @@ bool allThreadsDone(size_t threadCount, ThreadInfo const * threadInfo)
  * @param threads The threads to be cancelled
  * @param threadCount The number of threads in `threads`
  */
-void cancelAll(pthread_t const * threads, size_t threadCount)
+void cancelAll(pthread_t const * threads, ThreadInfo const * threadInfo, size_t threadCount)
 {
   size_t i;
   for (i = 0; i < threadCount; ++i)
   {
-    if (pthread_cancel(threads[i]))
+    if (!threadInfo[i].done && pthread_cancel(threads[i]))
     {
-      perror("pthread_cancel");
+      fprintf(stderr, "Tried to cancel a thread that does not exist.\n");
       exit(1);
     }
   }
