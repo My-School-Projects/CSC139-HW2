@@ -4,6 +4,8 @@
 #include <sys/timeb.h>
 #include <semaphore.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <limits.h>
 
 #define MAX_SIZE 100000000
 #define MAX_THREADS 16
@@ -18,9 +20,9 @@ int gThreadCount;
 // Used with the semaphore-based solution
 int gDoneThreadCount;
 // The minimum value found by each thread
-int gThreadMin[MAX_THREADS];
+volatile int gThreadMin[MAX_THREADS];
 // Is this thread done? Used when the parent is continually checking on child threads
-bool gThreadDone[MAX_THREADS];
+volatile bool gThreadDone[MAX_THREADS];
 
 // To notify parent that all threads have completed or one of them found a zero
 sem_t completed;
@@ -49,22 +51,35 @@ long GetCurrentTime(void);
 void SetTime(void);
 long GetTime(void);
 
+int stoi(char const * str);
+bool allThreadsDone();
+void cancelAll(pthread_t * threads);
+void joinAll(pthread_t * threads);
+void startAll(pthread_t * threads, void * (* threadFunc)(void *), int indices[MAX_THREADS][3]);
+
 int main(int argc, char * argv[])
 {
-  pthread_t tid[MAX_THREADS];
-  pthread_attr_t attr[MAX_THREADS];
-  int indices[MAX_THREADS][3];
-  int i, indexForZero, arraySize, min;
-  
   // Code for parsing and checking command-line arguments
   if (argc != 4)
   {
-    fprintf(stderr, "Invalid number of arguments!\n");
+    fprintf(stderr, "%s%s%s%s%s",
+            "Usage: MTFindMin <array_size> <num_threads> <index_of_zero>\n",
+            "array_size: The size of the array to be searched\n",
+            "num_threads: The number of threads to use\n",
+            "index_of_zero: The index in the array at which to place the zero. ",
+            "If -1, no zero will be placed.\n");
     exit(-1);
   }
-  if ((arraySize = atoi(argv[1])) <= 0 || arraySize > MAX_SIZE)
+  int arraySize = stoi(argv[1]);
+  if (arraySize <= 0 || arraySize > MAX_SIZE)
   {
-    fprintf(stderr, "Invalid Array Size\n");
+    fprintf(stderr, "array_size must be between 1 and %d\n", MAX_SIZE);
+    exit(-1);
+  }
+  gThreadCount = stoi(argv[2]);
+  if (gThreadCount > MAX_THREADS || gThreadCount < 1)
+  {
+    fprintf(stderr, "num_threads must be between 1 and %d\n", MAX_THREADS);
     exit(-1);
   }
   gThreadCount = atoi(argv[2]);
@@ -73,20 +88,21 @@ int main(int argc, char * argv[])
     fprintf(stderr, "Invalid Thread Count\n");
     exit(-1);
   }
-  indexForZero = atoi(argv[3]);
+  int indexForZero = stoi(argv[3]);
   if (indexForZero < -1 || indexForZero >= arraySize)
   {
-    fprintf(stderr, "Invalid index for zero!\n");
+    fprintf(stderr, "index_of_zero must be between -1 and %d (array_size - 1)\n", arraySize - 1);
     exit(-1);
   }
   
   GenerateInput(arraySize, indexForZero);
   
+  int indices[MAX_THREADS][3];
   CalculateIndices(arraySize, gThreadCount, indices);
   
   // Code for the sequential part
   SetTime();
-  min = SqFindMin(arraySize);
+  int min = SqFindMin(arraySize);
   printf("Sequential search completed in %ld ms. Min = %d\n", GetTime(), min);
   
   
@@ -98,9 +114,9 @@ int main(int argc, char * argv[])
   // Initialize threads, create threads, and then let the parent wait for all threads using pthread_join
   // The thread start function is ThFindMin
   // Don't forget to properly initialize shared variables
-  
-  
-  
+  pthread_t threads[MAX_THREADS];
+  startAll(threads, ThFindMin, indices);
+  joinAll(threads);
   min = SearchThreadMin();
   printf("Threaded FindMin with parent waiting for all children completed in %ld ms. Min = %d\n", GetTime(), min);
   
@@ -113,14 +129,23 @@ int main(int argc, char * argv[])
   // Initialize threads, create threads, and then make the parent continually check on all child threads
   // The thread start function is ThFindMin
   // Don't forget to properly initialize shared variables
-  
-  
+  startAll(threads, ThFindMin, indices);
+  while (!allThreadsDone())
+  {
+    if (SearchThreadMin() == 0)
+    {
+      cancelAll(threads);
+      break;
+    }
+  }
+  joinAll(threads);
   min = SearchThreadMin();
   printf("Threaded FindMin with parent continually checking on children completed in %ld ms. Min = %d\n", GetTime(),
          min);
   
-  
   // Multi-threaded with semaphores
+  sem_init(&completed, false, 0);
+  sem_init(&mutex, false, 1);
   
   InitSharedVars();
   // Initialize your semaphores here
@@ -131,24 +156,97 @@ int main(int argc, char * argv[])
   // Initialize threads, create threads, and then make the parent wait on the "completed" semaphore
   // The thread start function is ThFindMinWithSemaphore
   // Don't forget to properly initialize shared variables and semaphores using sem_init
-  
-  
-  
+  startAll(threads, ThFindMinWithSemaphore, indices);
+  if (sem_wait(&completed))
+  {
+    perror("sem_wait");
+    exit(1);
+  }
+  cancelAll(threads);
+  joinAll(threads);
   min = SearchThreadMin();
   printf("Threaded FindMin with parent waiting on a semaphore completed in %ld ms. Min = %d\n", GetTime(), min);
+  return 0;
+}
+
+bool allThreadsDone()
+{
+  int i;
+  for (i = 0; i < gThreadCount; ++i)
+  {
+    if (!gThreadDone[i]) return false;
+  }
+  return true;
+}
+
+void cancelAll(pthread_t * threads)
+{
+  int i;
+  for (i = 0; i < gThreadCount; ++i)
+  {
+    pthread_cancel(threads[i]);
+  }
+}
+
+void joinAll(pthread_t * threads)
+{
+  int i;
+  for (i = 0; i < gThreadCount; ++i)
+  {
+    if (pthread_join(threads[i], NULL))
+    {
+      perror("pthread_join");
+      exit(1);
+    }
+  }
+}
+
+void startAll(pthread_t * threads, void * (* threadFunc)(void *), int indices[MAX_THREADS][3])
+{
+  int i;
+  for (i = 0; i < gThreadCount; ++i)
+  {
+    if (pthread_create(&threads[i], NULL, threadFunc, indices[i]))
+    {
+      perror("pthread_create");
+      exit(1);
+    }
+  }
+}
+
+int findMinInRegion(int beg, int end)
+{
+  int min = MAX_RANDOM_NUMBER + 1;
+  int i;
+  for (i = beg; i <= end; ++i)
+  {
+    pthread_testcancel();
+    if (gData[i] == 0) return 0;
+    if (gData[i] < min)
+    {
+      min = gData[i];
+    }
+  }
+  return min;
 }
 
 // Write a regular sequential function to search for the minimum value in the array gData
 int SqFindMin(int size)
 {
-
+  return findMinInRegion(0, size-1);
 }
 
 // Write a thread function that searches for the minimum value in one division of the array
 // When it is done, this function should put the minimum in gThreadMin[threadNum] and set gThreadDone[threadNum] to true    
 void * ThFindMin(void * param)
 {
-  int threadNum = ((int *) param)[0];
+  int * info = (int *) param;
+  int threadNum = info[0];
+  int begin = info[1];
+  int end = info[2];
+  gThreadMin[threadNum] = findMinInRegion(begin, end);
+  gThreadDone[threadNum] = true;
+  return NULL;
 }
 
 // Write a thread function that searches for the minimum value in one division of the array
@@ -156,10 +254,28 @@ void * ThFindMin(void * param)
 // If the minimum value in this division is zero, this function should post the "completed" semaphore
 // If the minimum value in this division is not zero, this function should increment gDoneThreadCount and
 // post the "completed" semaphore if it is the last thread to be done
-// Don't forget to protect access to gDoneThreadCount with the "mutex" semaphore     
+// Don't forget to protect access to gDoneThreadCount with the "mutex" semaphore
 void * ThFindMinWithSemaphore(void * param)
 {
-
+  int * info = (int *) param;
+  int threadNum = info[0];
+  int begin = info[1];
+  int end = info[2];
+  gThreadMin[threadNum] = findMinInRegion(begin, end);
+  if (gThreadMin[threadNum] == 0)
+  {
+    sem_post(&completed);
+  }
+  else
+  {
+    sem_wait(&mutex);
+    if (++gDoneThreadCount == gThreadCount)
+    {
+      sem_post(&completed);
+    }
+    sem_post(&mutex);
+  }
+  return NULL;
 }
 
 int SearchThreadMin()
@@ -172,7 +288,7 @@ int SearchThreadMin()
     {
       return 0;
     }
-    if (gThreadDone[i] == true && gThreadMin[i] < min)
+    if (gThreadMin[i] < min)
     {
       min = gThreadMin[i];
     }
@@ -196,7 +312,21 @@ void InitSharedVars()
 // If indexForZero is valid and non-negative, set the value at that index to zero 
 void GenerateInput(int size, int indexForZero)
 {
-
+  if (indexForZero >= (int) size)
+  {
+    fprintf(stderr, "Index for zero too large");
+    exit(1);
+  }
+  srand(RANDOM_SEED);
+  int i;
+  for (i = 0; i < size; ++i)
+  {
+    gData[i] = rand() % MAX_RANDOM_NUMBER + 1;
+  }
+  if (indexForZero >= 0)
+  {
+    gData[indexForZero] = 0;
+  }
 }
 
 // Write a function that calculates the right indices to divide the array into thrdCnt equal divisions
@@ -204,7 +334,13 @@ void GenerateInput(int size, int indexForZero)
 // indices[i][1] should be set to the start index, and indices[i][2] should be set to the end index 
 void CalculateIndices(int arraySize, int thrdCnt, int indices[MAX_THREADS][3])
 {
-
+  int i = 0;
+  for (i = 0; i < thrdCnt; ++i)
+  {
+    indices[i][0] = i;
+    indices[i][1] = (i * arraySize) / thrdCnt;
+    indices[i][2] = ((i + 1) * arraySize) / thrdCnt - 1;
+  }
 }
 
 // Get a random number in the range [x, y]
@@ -244,3 +380,29 @@ long GetTime(void)
   return (crntTime - gRefTime);
 }
 
+/**
+ * Serves the same function as `atoi()`, but performs a number of checks.
+ * Checks that `str` is a numeric value, and also that it is in the range of `int`
+ */
+int stoi(char const * str)
+{
+  char * end;
+  errno = 0;
+  // Use strtol because atoi does not do any error checking
+  // 10 is for base-10
+  long val = strtol(str, &end, 10);
+  // If there was an error, (if the string is not numeric)
+  if (end == str || *end != '\0' || errno == ERANGE)
+  {
+    printf("%s is not a number.\n", str);
+    exit(1);
+  }
+  // Check if val is outside of int range
+  if (val < INT_MIN || val > INT_MAX)
+  {
+    printf("%s has too many digits.\n", str);
+    exit(1);
+  }
+  // Casting long to int is now safe
+  return (int) val;
+}
