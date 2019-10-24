@@ -6,7 +6,55 @@
 // CSC 139
 // Fall 2019
 // Section 2
-// Tested on: Ubuntu 19.04, CentOS 6.10 (athena)
+// Tested on:
+// + Ubuntu 19.04
+//   Architecture:        x86_64
+//   CPU op-mode(s):      32-bit, 64-bit
+//   Byte Order:          Little Endian
+//   Address sizes:       40 bits physical, 48 bits virtual
+//   CPU(s):              1
+//   On-line CPU(s) list: 0
+//   Thread(s) per core:  1
+//   Core(s) per socket:  1
+//   Socket(s):           1
+//   NUMA node(s):        1
+//   Vendor ID:           AuthenticAMD
+//   CPU family:          23
+//   Model:               1
+//   Model name:          AMD EPYC 7601 32-Core Processor
+//   Stepping:            2
+//   CPU MHz:             2199.994
+//   BogoMIPS:            4399.98
+//   Hypervisor vendor:   KVM
+//   Virtualization type: full
+//   L1d cache:           64K
+//   L1i cache:           64K
+//   L2 cache:            512K
+//   L3 cache:            16384K
+//   NUMA node0 CPU(s):   0
+//
+// + CentOS 6.10 (Athena)
+//   Architecture:          i686
+//   CPU op-mode(s):        32-bit, 64-bit
+//   Byte Order:            Little Endian
+//   CPU(s):                4
+//   On-line CPU(s) list:   0-3
+//   Thread(s) per core:    1
+//   Core(s) per socket:    2
+//   Socket(s):             2
+//   Vendor ID:             GenuineIntel
+//   CPU family:            6
+//   Model:                 45
+//   Model name:            Intel(R) Xeon(R) Silver 4110 CPU @ 2.10GHz
+//   Stepping:              2
+//   CPU MHz:               2095.078
+//   BogoMIPS:              4190.15
+//   Hypervisor vendor:     VMware
+//   Virtualization type:   full
+//   L1d cache:             32K
+//   L1i cache:             32K
+//   L2 cache:              1024K
+//   L3 cache:              11264K
 //===--------------------------------------------------------------------------------------------------------------===//
 
 #include <stdio.h>
