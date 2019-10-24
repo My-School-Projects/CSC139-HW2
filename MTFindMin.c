@@ -129,10 +129,10 @@ int main(const int argc, const char ** argv)
     if (searchThreadMinima(threadCount, threadInfo) == 0)
     {
       cancelAll(threadInfo, threadCount);
-      joinAll(threadInfo, threadCount);
       break;
     }
   }
+  joinAll(threadInfo, threadCount);
   min = searchThreadMinima(threadCount, threadInfo);
   printf("Threaded search with parent continually checking on children completed in %ld ms. Min = %d\n",
          timeSince(startTime), min);
