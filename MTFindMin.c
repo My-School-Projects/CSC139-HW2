@@ -47,9 +47,9 @@ typedef struct
  */
 typedef struct
 {
-  bool done;
+  volatile bool done;
   int const * data;
-  int minimum;
+  volatile int minimum;
   size_t begin_region;
   size_t end_region;
   SharedState * sharedState;
@@ -265,29 +265,30 @@ void * findMinThreadedWithSemaphore(void * threadInfo)
 {
   ThreadInfo * ti = (ThreadInfo *) threadInfo;
   ti->minimum = findMinInRegion(ti->data, ti->begin_region, ti->end_region);
-  int searchDone;
-  if (sem_getvalue(&ti->sharedState->searchDone, &searchDone))
-  {
-    perror("sem_getvalue");
-    exit(1);
-  }
-  printf("searchDone: %d\n", searchDone);
-  if (searchDone == 0) return NULL;
-  if (sem_wait(&ti->sharedState->doneThreadCountMutex))
-  {
-    perror("sem_wait");
-    exit(1);
-  }
-  size_t doneThreadCount = ++ti->sharedState->doneThreadCount;
-  if (sem_post(&ti->sharedState->doneThreadCountMutex))
-  {
-    perror("sem_post");
-    exit(1);
-  }
-  printf("doneThreadCount: %lu\n", doneThreadCount);
-  if (doneThreadCount == ti->sharedState->threadCount)
+  if (ti->minimum == 0)
   {
     if (sem_post(&ti->sharedState->searchDone))
+    {
+      perror("sem_post");
+      exit(1);
+    }
+  }
+  else
+  {
+    if (sem_wait(&ti->sharedState->doneThreadCountMutex))
+    {
+      perror("sem_wait");
+      exit(1);
+    }
+    if (++ti->sharedState->doneThreadCount == 0)
+    {
+      if (sem_post(&ti->sharedState->searchDone))
+      {
+        perror("sem_post");
+        exit(1);
+      }
+    }
+    if (sem_post(&ti->sharedState->doneThreadCountMutex))
     {
       perror("sem_post");
       exit(1);
@@ -337,7 +338,7 @@ SharedState initSharedState(size_t threadCount)
 {
   SharedState sharedState;
   // shared = false, value = 1
-  if (sem_init(&sharedState.searchDone, false, 1))
+  if (sem_init(&sharedState.searchDone, false, 0))
   {
     perror("sem_init");
     exit(1);
