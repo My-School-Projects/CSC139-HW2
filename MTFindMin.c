@@ -7,7 +7,7 @@
 // Fall 2019
 // Section 2
 // Tested on:
-// + Ubuntu 19.04
+// + Enigma (Ubuntu 19.04)
 //   Architecture:        x86_64
 //   CPU op-mode(s):      32-bit, 64-bit
 //   Byte Order:          Little Endian
@@ -33,7 +33,7 @@
 //   L3 cache:            16384K
 //   NUMA node0 CPU(s):   0
 //
-// + CentOS 6.10 (Athena)
+// + Athena (CentOS 6.10)
 //   Architecture:          i686
 //   CPU op-mode(s):        32-bit, 64-bit
 //   Byte Order:            Little Endian
